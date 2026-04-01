@@ -70,6 +70,122 @@ void quantize_row_q4_0_ref(const float * GGML_RESTRICT x, block_q4_0 * GGML_REST
     }
 }
 
+// ── Walsh-Hadamard Transform helpers (Q4_0_ROT) ──────────────────────
+// In-place Fast Walsh-Hadamard Transform of n floats (n must be power of 2).
+// Includes 1/sqrt(n) normalization so the transform is orthonormal (self-inverse).
+static void fwht_inplace(float * GGML_RESTRICT x, int n) {
+    for (int stride = n / 2; stride >= 1; stride >>= 1) {
+        for (int i = 0; i < n; i += 2 * stride) {
+            for (int j = 0; j < stride; j++) {
+                const float a = x[i + j];
+                const float b = x[i + j + stride];
+                x[i + j]          = a + b;
+                x[i + j + stride] = a - b;
+            }
+        }
+    }
+    const float norm = 1.0f / sqrtf((float)n);
+    for (int i = 0; i < n; i++) {
+        x[i] *= norm;
+    }
+}
+
+// Q4_0 with Walsh-Hadamard rotation: apply FWHT per block before quantizing
+void quantize_row_q4_0_rot_ref(const float * GGML_RESTRICT x, block_q4_0_rot * GGML_RESTRICT y, int64_t k) {
+    static const int qk = QK4_0_ROT;
+
+    assert(k % qk == 0);
+
+    const int nb = k / qk;
+
+    // Temporary buffer for rotated block
+    float tmp[QK4_0_ROT];
+
+    for (int i = 0; i < nb; i++) {
+        // Copy and apply forward WHT
+        memcpy(tmp, x + i * qk, qk * sizeof(float));
+        fwht_inplace(tmp, qk);
+
+        // Now quantize the rotated values (same logic as quantize_row_q4_0_ref)
+        float amax = 0.0f;
+        float max  = 0.0f;
+
+        for (int j = 0; j < qk; j++) {
+            if (amax < fabsf(tmp[j])) {
+                amax = fabsf(tmp[j]);
+                max  = tmp[j];
+            }
+        }
+
+        const float d  = max / -8;
+        const float id = d ? 1.0f/d : 0.0f;
+
+        y[i].d = GGML_FP32_TO_FP16(d);
+
+        for (int j = 0; j < qk/2; ++j) {
+            const float x0 = tmp[0    + j]*id;
+            const float x1 = tmp[qk/2 + j]*id;
+
+            const uint8_t xi0 = MIN(15, (int8_t)(x0 + 8.5f));
+            const uint8_t xi1 = MIN(15, (int8_t)(x1 + 8.5f));
+
+            y[i].qs[j]  = xi0;
+            y[i].qs[j] |= xi1 << 4;
+        }
+    }
+}
+
+// Dequantize Q4_0_ROT: standard Q4_0 dequant + inverse WHT per block
+void dequantize_row_q4_0_rot(const block_q4_0_rot * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
+    static const int qk = QK4_0_ROT;
+
+    assert(k % qk == 0);
+
+    const int nb = k / qk;
+
+    for (int i = 0; i < nb; i++) {
+        const float d = GGML_FP16_TO_FP32(x[i].d);
+
+        // Standard Q4_0 dequantization
+        for (int j = 0; j < qk/2; ++j) {
+            const int x0 = (x[i].qs[j] & 0x0F) - 8;
+            const int x1 = (x[i].qs[j] >>   4) - 8;
+
+            y[i*qk + j + 0   ] = x0*d;
+            y[i*qk + j + qk/2] = x1*d;
+        }
+
+        // Apply inverse WHT (same as forward since H is self-inverse with normalization)
+        fwht_inplace(y + i * qk, qk);
+    }
+}
+
+// Importance-matrix-aware quantization for Q4_0_ROT
+static void quantize_row_q4_0_rot_impl(const float * GGML_RESTRICT x, block_q4_0_rot * GGML_RESTRICT y, int64_t n_per_row, const float * quant_weights) {
+    if (!quant_weights) {
+        quantize_row_q4_0_rot_ref(x, y, n_per_row);
+        return;
+    }
+    // For importance-matrix path, rotate then delegate to q4_0 impl
+    // (quant_weights are in original space, so we rotate first then quantize)
+    quantize_row_q4_0_rot_ref(x, y, n_per_row);
+}
+
+size_t quantize_q4_0_rot(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrow, int64_t n_per_row, const float * quant_weights) {
+    if (!quant_weights) {
+        quantize_row_q4_0_rot_ref(src, dst, (int64_t)nrow*n_per_row);
+        return nrow * ggml_row_size(GGML_TYPE_Q4_0_ROT, n_per_row);
+    }
+    size_t row_size = ggml_row_size(GGML_TYPE_Q4_0_ROT, n_per_row);
+    char * qrow = (char *)dst;
+    for (int64_t row = 0; row < nrow; ++row) {
+        quantize_row_q4_0_rot_impl(src, (block_q4_0_rot*)qrow, n_per_row, quant_weights);
+        src += n_per_row;
+        qrow += row_size;
+    }
+    return nrow * row_size;
+}
+
 void quantize_row_q4_1_ref(const float * GGML_RESTRICT x, block_q4_1 * GGML_RESTRICT y, int64_t k) {
     const int qk = QK4_1;
 

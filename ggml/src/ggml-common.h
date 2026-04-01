@@ -177,6 +177,12 @@ typedef struct {
 } block_q4_0;
 static_assert(sizeof(block_q4_0) == sizeof(ggml_half) + QK4_0 / 2, "wrong q4_0 block size/padding");
 
+// Q4_0 with Walsh-Hadamard rotation (lmcpp custom)
+// Same binary layout as block_q4_0 — the rotation is applied during quantize/dequantize
+#define QK4_0_ROT 32
+typedef block_q4_0 block_q4_0_rot;
+static_assert(sizeof(block_q4_0_rot) == sizeof(ggml_half) + QK4_0_ROT / 2, "wrong q4_0_rot block size/padding");
+
 #define QK4_1 32
 typedef struct {
     GGML_EXTENSION union {

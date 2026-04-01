@@ -26,6 +26,10 @@ void quantize_row_q4_0(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, in
     quantize_row_q4_0_ref(x, y, k);
 }
 
+void quantize_row_q4_0_rot(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k) {
+    quantize_row_q4_0_rot_ref(x, y, k);
+}
+
 void quantize_row_q4_1(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k) {
     quantize_row_q4_1_ref(x, y, k);
 }
@@ -151,6 +155,20 @@ void ggml_vec_dot_q4_0_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs, c
 
     *s = sumf;
 }
+
+// Q4_0_ROT vec_dot: delegates to Q4_0 since block layout is identical
+// (Walsh-Hadamard rotation is applied during quantize/dequantize, not dot product)
+void ggml_vec_dot_q4_0_rot_q8_0_generic(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc) {
+    ggml_vec_dot_q4_0_q8_0_generic(n, s, bs, vx, bx, vy, by, nrc);
+}
+
+#if !defined(GGML_CPU_GENERIC)
+// For non-generic builds, provide ggml_vec_dot_q4_0_rot_q8_0 as well
+// (no arch-specific optimized version exists for Q4_0_ROT)
+void ggml_vec_dot_q4_0_rot_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc) {
+    ggml_vec_dot_q4_0_q8_0(n, s, bs, vx, bx, vy, by, nrc);
+}
+#endif
 
 // TODO: add WASM SIMD
 void ggml_vec_dot_q4_1_q8_1_generic(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc) {

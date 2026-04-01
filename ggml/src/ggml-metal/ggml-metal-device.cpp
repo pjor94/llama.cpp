@@ -737,6 +737,7 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv(ggml_meta
                 }
             } break;
         case GGML_TYPE_Q4_0:
+        case GGML_TYPE_Q4_0_ROT:
             {
                 nsg = N_SG_Q4_0;
                 nr0 = N_R0_Q4_0;
@@ -851,7 +852,10 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv(ggml_meta
             }
     };
 
-    snprintf(base, 256, "kernel_mul_mv_%s_%s%s", ggml_type_name(tsrc0), ggml_type_name(tsrc1), suffix);
+    // Q4_0_ROT is a typedef of Q4_0 — same block type, so kernel_mul_mv uses Q4_0's kernel.
+    const char * src0_name = (tsrc0 == GGML_TYPE_Q4_0_ROT) ? "q4_0" : ggml_type_name(tsrc0);
+
+    snprintf(base, 256, "kernel_mul_mv_%s_%s%s", src0_name, ggml_type_name(tsrc1), suffix);
     snprintf(name, 256, "%s_nsg=%d", base, nsg);
 
     ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
@@ -949,6 +953,7 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv_id(ggml_m
                 suffix = ne00 % 4 == 0 ? "_4" : "";
             } break;
         case GGML_TYPE_Q4_0:
+        case GGML_TYPE_Q4_0_ROT:
             {
                 nsg = N_SG_Q4_0;
                 nr0 = N_R0_Q4_0;
@@ -1063,7 +1068,10 @@ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_mul_mv_id(ggml_m
             }
     };
 
-    snprintf(base, 256, "kernel_mul_mv_id_%s_%s%s", ggml_type_name(tsrc0), ggml_type_name(tsrc1), suffix);
+    // Q4_0_ROT is a typedef of Q4_0 — same block type, so kernel_mul_mv_id uses Q4_0's kernel.
+    const char * src0_name_id = (tsrc0 == GGML_TYPE_Q4_0_ROT) ? "q4_0" : ggml_type_name(tsrc0);
+
+    snprintf(base, 256, "kernel_mul_mv_id_%s_%s%s", src0_name_id, ggml_type_name(tsrc1), suffix);
     snprintf(name, 256, "%s_nsg=%d", base, nsg);
 
     ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
